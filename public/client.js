@@ -10,7 +10,24 @@ let ws = null;
 let pc = null;
 let dataChannel = null;
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
 
 function connect() {
   const code = pinInput.value.trim();
@@ -54,6 +71,11 @@ async function handleOffer(offer) {
   pc.ontrack = (e) => {
     video.srcObject = e.streams[0];
     connStateEl.textContent = '✅ Connected — live peer-to-peer';
+    video.play().catch((err) => {
+      console.warn('Autoplay blocked, click the video to start:', err);
+      connStateEl.textContent = '✅ Connected — click the video to start it';
+      video.addEventListener('click', () => video.play(), { once: true });
+    });
   };
 
   pc.ondatachannel = (e) => {
