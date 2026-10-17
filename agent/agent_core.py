@@ -27,7 +27,24 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, R
 
 pyautogui.FAILSAFE = False
 
-ICE_SERVERS = [RTCIceServer(urls="stun:stun.l.google.com:19302")]
+ICE_SERVERS = [
+    RTCIceServer(urls="stun:stun.l.google.com:19302"),
+    RTCIceServer(
+        urls="turn:openrelay.metered.ca:80",
+        username="openrelayproject",
+        credential="openrelayproject",
+    ),
+    RTCIceServer(
+        urls="turn:openrelay.metered.ca:443",
+        username="openrelayproject",
+        credential="openrelayproject",
+    ),
+    RTCIceServer(
+        urls="turn:openrelay.metered.ca:443?transport=tcp",
+        username="openrelayproject",
+        credential="openrelayproject",
+    ),
+]
 
 
 class ScreenTrack(VideoStreamTrack):

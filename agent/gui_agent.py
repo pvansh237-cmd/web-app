@@ -13,8 +13,8 @@ from tkinter import messagebox
 
 from agent_core import run_agent
 
-SERVER_URL = "wss://screen-project.onrender.com"
-VIEWER_LINK = "https://screen-project.onrender.com"
+SERVER_URL = "wss://web-app-swqz.onrender.com"
+VIEWER_LINK = "https://web-app-swqz.onrender.com"
 
 
 class AgentState:
