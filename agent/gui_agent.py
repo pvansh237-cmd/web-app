@@ -13,8 +13,8 @@ from tkinter import messagebox
 
 from agent_core import run_agent
 
-SERVER_URL = "wss://web-app-swqz.onrender.com"
-VIEWER_LINK = "https://web-app-swqz.onrender.com"
+SERVER_URL = "wss://screen-project.onrender.com"
+VIEWER_LINK = "https://screen-project.onrender.com"
 
 
 class AgentState:
@@ -35,6 +35,10 @@ def start_agent_thread(on_pin_ready, on_status, on_error, on_stopped):
         stop_event = asyncio.Event()
         state.stop_event = stop_event
         try:
+            # run_agent only raises if it NEVER managed to connect at all.
+            # Once a peer connection is live, it keeps the loop alive on
+            # its own until stop_event is set — signaling hiccups won't
+            # kill an already-working screen share.
             loop.run_until_complete(run_agent(SERVER_URL, on_pin_ready, on_status, stop_event))
         except Exception as e:
             on_error(str(e))

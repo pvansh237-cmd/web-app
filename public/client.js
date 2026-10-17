@@ -10,7 +10,7 @@ let ws = null;
 let pc = null;
 let dataChannel = null;
 
-let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function connect() {
   const code = pinInput.value.trim();
@@ -30,7 +30,6 @@ function connect() {
     const msg = JSON.parse(event.data);
 
     if (msg.type === 'joined') {
-      if (msg.iceServers) ICE_SERVERS = msg.iceServers;
       joinBox.style.display = 'none';
       viewerWrap.style.display = 'flex';
       statusEl.textContent = '';
@@ -54,20 +53,17 @@ async function handleOffer(offer) {
 
   pc.ontrack = (e) => {
     video.srcObject = e.streams[0];
-    video.play().catch(() => {});
+    connStateEl.textContent = '✅ Connected — live peer-to-peer';
   };
 
   pc.ondatachannel = (e) => {
     dataChannel = e.channel;
   };
 
-  pc.onconnectionstatechange = () => {
-    const st = pc.connectionState;
-    console.log('connectionState:', st, 'ice:', pc.iceConnectionState);
-    if (st === 'connected') connStateEl.textContent = '✅ Connected — live peer-to-peer';
-    else if (st === 'failed') connStateEl.textContent = '❌ Connection failed (network blocked P2P — TURN needed)';
-    else if (st === 'disconnected') connStateEl.textContent = '⚠️ Connection lost';
-    else connStateEl.textContent = 'Connecting... (' + st + ')';
+  pc.oniceconnectionstatechange = () => {
+    if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+      connStateEl.textContent = '⚠️ Connection lost';
+    }
   };
 
   await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -130,7 +126,12 @@ video.addEventListener('contextmenu', (e) => e.preventDefault());
 
 video.addEventListener('wheel', (e) => {
   e.preventDefault();
-  sendControl({ action: 'scroll', amount: e.deltaY > 0 ? -2 : 2 });
+  // One normal mouse-wheel notch is usually ~100 deltaY — scale that up
+  // to a clearly noticeable scroll amount instead of a tiny nudge.
+  const notches = e.deltaY / 100;
+  let amount = Math.round(-notches * 6);
+  amount = Math.max(-20, Math.min(20, amount));
+  sendControl({ action: 'scroll', amount });
 }, { passive: false });
 
 video.addEventListener('keydown', (e) => {
