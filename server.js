@@ -18,19 +18,37 @@ const path = require('path');
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Both the browser and the Python agent ask THIS server for TURN
+// credentials — the ExpressTURN username/password stay only in Render's
+// environment variables, never in any file that gets committed.
+app.get('/turn-credentials', (req, res) => {
+  // Try env-configured TURN first (set these in Render if you sign up
+  // for ExpressTURN or another provider later)
+  const username = process.env.TURN_USERNAME;
+  const password = process.env.TURN_PASSWORD;
+  const host = process.env.TURN_HOST;
+
+  if (username && password && host) {
+    return res.json({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: `turn:${host}`, username, credential: password },
+        { urls: `turn:${host}?transport=tcp`, username, credential: password },
+      ],
+    });
+  }
+
+  // No account needed for this one — zero setup, try it directly.
+  res.json({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' },
+    ],
+  });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-
-// ICE servers shared with both sides. Default = Google STUN.
-// Optional TURN (set these 3 env vars on Render): TURN_URL, TURN_USER, TURN_PASS
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
-if (process.env.TURN_URL) {
-  ICE_SERVERS.push({
-    urls: process.env.TURN_URL.split(','),
-    username: process.env.TURN_USER,
-    credential: process.env.TURN_PASS,
-  });
-}
 
 // code -> { hostWs, viewers: Map<id, ws> }
 const rooms = new Map();
@@ -61,26 +79,21 @@ wss.on('connection', (ws) => {
       ws.role = 'host';
       ws.code = code;
       rooms.set(code, { hostWs: ws, viewers: new Map() });
-      ws.send(JSON.stringify({ type: 'code', code, iceServers: ICE_SERVERS }));
+      ws.send(JSON.stringify({ type: 'code', code }));
       console.log(`[host] room ${code} created`);
       return;
     }
 
     if (msg.type === 'viewer:join') {
-      if ((ws.failed || 0) >= 5) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Too many wrong attempts. Refresh the page.' }));
-        return;
-      }
       const room = rooms.get(msg.code);
       if (!room) {
-        ws.failed = (ws.failed || 0) + 1;
         ws.send(JSON.stringify({ type: 'error', message: 'Invalid code or host offline' }));
         return;
       }
       ws.role = 'viewer';
       ws.code = msg.code;
       room.viewers.set(ws.id, ws);
-      ws.send(JSON.stringify({ type: 'joined', iceServers: ICE_SERVERS }));
+      ws.send(JSON.stringify({ type: 'joined' }));
       room.hostWs.send(JSON.stringify({ type: 'host:viewer-joined', viewerId: ws.id }));
       console.log(`[viewer] ${ws.id} joined room ${msg.code}`);
       return;
