@@ -21,30 +21,29 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Both the browser and the Python agent ask THIS server for TURN
 // credentials — the ExpressTURN username/password stay only in Render's
 // environment variables, never in any file that gets committed.
-app.get('/turn-credentials', (req, res) => {
-  // Try env-configured TURN first (set these in Render if you sign up
-  // for ExpressTURN or another provider later)
-  const username = process.env.TURN_USERNAME;
-  const password = process.env.TURN_PASSWORD;
-  const host = process.env.TURN_HOST;
+app.get('/turn-credentials', async (req, res) => {
+  const apiToken = process.env.TURNIX_API_TOKEN;
 
-  if (username && password && host) {
-    return res.json({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: `turn:${host}`, username, credential: password },
-        { urls: `turn:${host}?transport=tcp`, username, credential: password },
-      ],
-    });
+  if (!apiToken) {
+    // Not configured — fall back to STUN only.
+    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
   }
 
-  // No account needed for this one — zero setup, try it directly.
-  res.json({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' },
-    ],
-  });
+  try {
+    const turnixRes = await fetch('https://turnix.io/api/v1/credentials/ice', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ttl: 86400 }),
+    });
+    const data = await turnixRes.json();
+    res.json(data); // { iceServers: [...] }
+  } catch (e) {
+    console.error('Turnix TURN fetch failed:', e);
+    res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  }
 });
 
 const server = http.createServer(app);

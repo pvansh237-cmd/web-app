@@ -10,24 +10,18 @@ let ws = null;
 let pc = null;
 let dataChannel = null;
 
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-];
+// Ask OUR OWN server for TURN credentials — it holds the Cloudflare
+// secret server-side and hands back short-lived, safe-to-use credentials.
+async function getIceServers() {
+  try {
+    const res = await fetch('/turn-credentials');
+    const data = await res.json();
+    return data.iceServers;
+  } catch (e) {
+    console.warn('Could not fetch TURN credentials, using STUN only.', e);
+    return [{ urls: 'stun:stun.l.google.com:19302' }];
+  }
+}
 
 function connect() {
   const code = pinInput.value.trim();
@@ -66,7 +60,8 @@ function connect() {
 }
 
 async function handleOffer(offer) {
-  pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const iceServers = await getIceServers();
+  pc = new RTCPeerConnection({ iceServers });
 
   pc.ontrack = (e) => {
     video.srcObject = e.streams[0];
@@ -83,12 +78,30 @@ async function handleOffer(offer) {
   };
 
   pc.oniceconnectionstatechange = () => {
-    if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-      connStateEl.textContent = '⚠️ Connection lost';
+    console.log('ICE connection state:', pc.iceConnectionState);
+    if (pc.iceConnectionState === 'failed') {
+      connStateEl.textContent = '⚠️ Connection failed';
+    } else if (pc.iceConnectionState === 'disconnected') {
+      connStateEl.textContent = '⚠️ Connection unstable, trying to recover...';
+    } else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      connStateEl.textContent = '✅ Connected — live peer-to-peer';
     }
   };
 
   await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+  // Force VP8 codec — avoids black-screen issues some H264 setups cause
+  try {
+    const transceiver = pc.getTransceivers().find(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'video');
+    if (transceiver && transceiver.setCodecPreferences && RTCRtpReceiver.getCapabilities) {
+      const caps = RTCRtpReceiver.getCapabilities('video');
+      const vp8 = caps.codecs.filter(c => c.mimeType === 'video/VP8');
+      if (vp8.length) transceiver.setCodecPreferences(vp8);
+    }
+  } catch (e) {
+    console.warn('Could not set codec preference:', e);
+  }
+
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
 

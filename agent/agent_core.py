@@ -22,29 +22,34 @@ import numpy as np
 import mss
 import pyautogui
 import websockets
+import aiohttp
 import av
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer, VideoStreamTrack
 
 pyautogui.FAILSAFE = False
 
-ICE_SERVERS = [
-    RTCIceServer(urls="stun:stun.l.google.com:19302"),
-    RTCIceServer(
-        urls="turn:openrelay.metered.ca:80",
-        username="openrelayproject",
-        credential="openrelayproject",
-    ),
-    RTCIceServer(
-        urls="turn:openrelay.metered.ca:443",
-        username="openrelayproject",
-        credential="openrelayproject",
-    ),
-    RTCIceServer(
-        urls="turn:openrelay.metered.ca:443?transport=tcp",
-        username="openrelayproject",
-        credential="openrelayproject",
-    ),
-]
+async def get_ice_servers(server_url):
+    """Ask OUR OWN signaling server for TURN credentials — it holds the
+    Cloudflare secret server-side and hands back short-lived credentials.
+    Falls back to STUN-only if that call fails for any reason."""
+    http_url = server_url.replace('wss://', 'https://').replace('ws://', 'http://')
+    http_url = http_url.rstrip('/') + '/turn-credentials'
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(http_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json()
+        servers = []
+        for entry in data.get('iceServers', []):
+            servers.append(RTCIceServer(
+                urls=entry['urls'],
+                username=entry.get('username'),
+                credential=entry.get('credential'),
+            ))
+        print(f"[info] Loaded {len(servers)} ICE servers.")
+        return servers
+    except Exception as e:
+        print(f"[warning] Could not fetch TURN credentials ({e}), using STUN only.")
+        return [RTCIceServer(urls="stun:stun.l.google.com:19302")]
 
 
 class ScreenTrack(VideoStreamTrack):
@@ -54,11 +59,18 @@ class ScreenTrack(VideoStreamTrack):
         super().__init__()
         self._sct = mss.mss()
         self._monitor = self._sct.monitors[1]
+        self._frame_count = 0
 
     async def recv(self):
         pts, time_base = await self.next_timestamp()
         raw = np.array(self._sct.grab(self._monitor))
         img = cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+
+        self._frame_count += 1
+        if self._frame_count % 30 == 1:  # print every ~30 frames
+            print(f"[ScreenTrack] frame #{self._frame_count}, shape={img.shape}, "
+                  f"mean_brightness={img.mean():.1f} (0=pure black, 255=pure white)")
+
         frame = av.VideoFrame.from_ndarray(img, format="bgr24")
         frame.pts = pts
         frame.time_base = time_base
@@ -131,6 +143,7 @@ async def run_agent(server_url, on_pin_ready, on_status, stop_event):
     screen_w, screen_h = pyautogui.size()
     pcs = {}  # viewerId -> RTCPeerConnection
     had_connection = False
+    ice_servers = await get_ice_servers(server_url)
 
     try:
         async with websockets.connect(server_url, max_size=None, open_timeout=60,
@@ -156,7 +169,7 @@ async def run_agent(server_url, on_pin_ready, on_status, stop_event):
 
                     if mtype == 'host:viewer-joined':
                         viewer_id = msg['viewerId']
-                        config = RTCConfiguration(iceServers=ICE_SERVERS)
+                        config = RTCConfiguration(iceServers=ice_servers)
                         pc = RTCPeerConnection(configuration=config)
                         pcs[viewer_id] = pc
 
